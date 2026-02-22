@@ -1,0 +1,5 @@
+pin led = Pin(2, out)
+loop{
+    led.toggle()
+    sleep(1s)
+}
