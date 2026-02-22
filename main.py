@@ -1,6 +1,7 @@
 from lexer import Lexer
-from parser import Parser 
-import pprint 
+from parser import Parser
+from semantic import SemanticAnalyzer
+from generator import CppCodeGenerator 
 def main():
     source_code = """
     pin led = Pin(2, out)
@@ -11,20 +12,25 @@ def main():
     """
 
     print("=== Nova Compiler ===")
-    print("Reading source code...\n")
     
     my_lexer = Lexer(source_code)
     tokens = my_lexer.tokenize()
-    
-    print("--- Lexer Output ---")
-    for tok in tokens:
-        print(f"[{tok.line}:{tok.column}] {tok.type.name} -> '{tok.value}'")
 
-    print("\n--- Parser Output (AST) ---")
     my_parser = Parser(tokens)
-    ast = my_parser.parse_program() 
+    ast = my_parser.parse_program()
     
-    pprint.pprint(ast)
+    analyzer = SemanticAnalyzer()
+    analyzer.analyze(ast)
+    print("Semantic Analysis Passed! Code is safe for ESP32.\n")
+    
+    print("Generating Optimized ESP32 C++ Code...\n")
+    print("================ C++ OUTPUT ================\n")
+    
+    generator = CppCodeGenerator()
+    cpp_code = generator.generate(ast)
+    print(cpp_code)
+    
+    print("\n============================================")
 
 if __name__ == "__main__":
     main()
