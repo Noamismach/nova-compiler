@@ -1,0 +1,187 @@
+# =============================================================================
+# NOVA Compiler — .gitignore
+# Covers: Python runtime artifacts, virtual environments, IDE state,
+#         compiler build outputs, arduino-cli artifacts, and OS metadata.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Python — Bytecode and Cache
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# C extensions
+*.so
+
+# Distribution and packaging
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+.eggs/
+
+# PyInstaller
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test and coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+pytestdebug.log
+
+# -----------------------------------------------------------------------------
+# Virtual Environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv*/
+Pipfile.lock
+
+# -----------------------------------------------------------------------------
+# IDE and Editor State
+# -----------------------------------------------------------------------------
+
+# Visual Studio Code
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/*.log
+# To exclude the entire .vscode directory, uncomment:
+# .vscode/
+
+# JetBrains IDEs
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-workspace
+
+# Vim and Neovim
+*.swp
+*.swo
+Session.vim
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# -----------------------------------------------------------------------------
+# NOVA Compiler — Build and Generated Artifacts
+# Retain hand-authored source .cpp files (e.g., under src/).
+# Exclude all machine-generated outputs under build/.
+# -----------------------------------------------------------------------------
+build/
+
+# Binary firmware artifacts produced by arduino-cli
+*.bin
+*.elf
+*.hex
+*.map
+
+# Generated C++ translation units produced by the NOVA transpiler
+build/*.cpp
+build/**/*.cpp
+build/**/*.ino
+*.generated.cpp
+*_generated.cpp
+*_sketch/
+
+# Specific generated files common to the build tree
+main.cpp
+main_esp32.cpp
+main_generic.cpp
+phase4_generic.cpp
+tmp_hw.cpp
+
+
+# -----------------------------------------------------------------------------
+# arduino-cli — Sketch and Compilation Temporaries
+# -----------------------------------------------------------------------------
+sketch/
+*.ino.globals.h
+*.ino.cpp
+*.ino
+
+
+# -----------------------------------------------------------------------------
+# Environment and Secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+secrets.yaml
+secrets.toml
+
+
+# -----------------------------------------------------------------------------
+# Operating System Metadata
+# -----------------------------------------------------------------------------
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+.directory
+.fuse_hidden*
+.Trash-*
+.nfs*
+
+
+# -----------------------------------------------------------------------------
+# Logs and Diagnostics
+# -----------------------------------------------------------------------------
+*.log
+logs/
+nova_debug.log
+arduino_build.log
+
+
+# -----------------------------------------------------------------------------
+# Temporary and Scratch Files
+# -----------------------------------------------------------------------------
+*.tmp
+*.bak
+*.orig
+*.rej
+.scratch/
+tmp/
+temp/
+site/

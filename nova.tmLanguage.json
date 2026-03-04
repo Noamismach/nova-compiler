@@ -1,0 +1,139 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "NOVA DSL",
+  "scopeName": "source.nova",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#unsafe"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#timeLiterals"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.nova",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.nova",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "unsafe": {
+      "patterns": [
+        {
+          "name": "meta.unsafe.block.nova",
+          "begin": "\\bunsafe\\b\\s*\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "keyword.control.unsafe.nova"
+            }
+          },
+          "end": "\\}",
+          "patterns": [
+            {
+              "include": "source.cpp"
+            }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.nova",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.nova",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "timeLiterals": {
+      "patterns": [
+        {
+          "name": "constant.numeric.time.nova",
+          "match": "\\b\\d+(?:ms|s)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.nova",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.nova",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.nova",
+          "match": "\\b(?:int|float|bool|string|void|pin|pwm|analog)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.nova",
+          "match": "\\b(?:let|fn|import|loop|if|else|while|for|return|unsafe|in|out|pin|pwm|analog)\\b"
+        },
+        {
+          "name": "constant.language.boolean.nova",
+          "match": "\\b(?:true|false)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.hardware.nova",
+          "match": "\\b(?:gpioMode|digitalWrite|pwmWrite|analogRead|wifiConnect|delay)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.nova",
+          "match": "(?:==|!=|<=|>=|&&|\\|\\||=|\\+|-|\\*|/|%|<|>|!)"
+        }
+      ]
+    }
+  }
+}

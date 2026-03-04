@@ -1,0 +1,73 @@
+(* ESP32 DSL Grammar - Planned v1 *)
+
+program         = { top_decl } EOF ;
+
+top_decl        = import_decl
+                | function_decl
+                | loop_decl
+                | var_decl
+                | statement ;
+
+import_decl     = "import" STRING ";" ;
+
+function_decl   = "fn" IDENT "(" [ param_list ] ")" "->" type block ;
+loop_decl       = "loop" block ;
+param_list      = param { "," param } ;
+param           = IDENT ":" type ;
+
+type            = IDENT ;
+
+var_decl        = "let" IDENT [ ":" type ] [ "=" expression ] ";" ;
+
+statement       = block
+                | if_stmt
+                | while_stmt
+                | for_stmt
+                | return_stmt
+                | gpio_mode_stmt
+                | digital_write_stmt
+                | pwm_write_stmt
+                | rgb_write_stmt
+                | wifi_connect_stmt
+                | delay_stmt
+                | unsafe_stmt
+                | expr_stmt ;
+
+block           = "{" { top_decl } "}" ;
+
+if_stmt         = "if" "(" expression ")" block [ "else" block ] ;
+while_stmt      = "while" "(" expression ")" block ;
+for_stmt        = "for" "(" [ for_init ] ";" [ expression ] ";" [ expression ] ")" block ;
+for_init        = var_decl_no_semi | expression ;
+var_decl_no_semi= "let" IDENT [ ":" type ] [ "=" expression ] ;
+
+return_stmt     = "return" [ expression ] ";" ;
+expr_stmt       = expression ";" ;
+
+gpio_mode_stmt  = "gpioMode" "(" expression "," ("out" | "in") ")" ";" ;
+digital_write_stmt = "digitalWrite" "(" expression "," expression ")" ";" ;
+pwm_write_stmt  = "pwmWrite" "(" expression "," expression [ "," expression ] ")" ";" ;
+rgb_write_stmt  = "rgbWrite" "(" expression "," expression "," expression "," expression ")" ";" ;
+
+wifi_connect_stmt = "wifiConnect" "(" expression "," expression ")" ";" ;
+delay_stmt      = "delay" "(" expression ")" ";" ;
+unsafe_stmt     = "unsafe" raw_block ;
+
+raw_block       = RAW_UNSAFE_BLOCK ;
+
+expression      = assignment ;
+assignment      = IDENT "=" assignment | logic_or ;
+logic_or        = logic_and { "||" logic_and } ;
+logic_and       = equality { "&&" equality } ;
+equality        = comparison { ("==" | "!=") comparison } ;
+comparison      = term { ("<" | "<=" | ">" | ">=") term } ;
+term            = factor { ("+" | "-") factor } ;
+factor          = unary { ("*" | "/" | "%") unary } ;
+unary           = ("!" | "-") unary | call ;
+call            = primary { "(" [ argument_list ] ")" } ;
+argument_list   = expression { "," expression } ;
+
+primary         = INT | FLOAT | STRING | "true" | "false"
+                | IDENT
+                | "analogRead" "(" expression ")"
+                | "(" expression ")" ;
