@@ -1,0 +1,19 @@
+struct WiFiConfig {
+    ssid: string;
+    password: string;
+}
+
+fn connectWiFi(cfg: WiFiConfig) -> void {
+    unsafe {
+        // WiFi headers are injected by NOVA code generation prelude.
+        Serial.begin(115200);
+        Serial.println("NOVA: Connecting to WiFi...");
+        WiFi.begin(cfg.ssid.c_str(), cfg.password.c_str());
+        while (WiFi.status() != WL_CONNECTED) {
+            Serial.println("NOVA: waiting for WL_CONNECTED...");
+            delay(500);
+        }
+        Serial.println("NOVA: WiFi connected.");
+        Serial.println(WiFi.localIP());
+    }
+}

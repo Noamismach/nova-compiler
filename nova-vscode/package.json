@@ -1,0 +1,38 @@
+{
+  "name": "nova-language-support",
+  "displayName": "NOVA Language Support",
+  "description": "Syntax highlighting for NOVA .myext files",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:nova"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nova",
+        "aliases": [
+          "NOVA",
+          "nova"
+        ],
+        "extensions": [
+          ".myext"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nova",
+        "scopeName": "source.nova",
+        "path": "./syntaxes/nova.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from ast_nodes import (
     AssignmentExpr,
@@ -94,6 +94,7 @@ class ArduinoGeneratorBase:
         self.line_map: Dict[int, SourceMapEntry] = {}
         self.struct_field_order: Dict[str, List[str]] = {}
         self.task_decl_map: Dict[str, TaskDecl] = {}
+        self.required_headers: Set[str] = set()
 
     def generate(self, program: Program) -> GeneratedOutput:
         """Lower a parsed NOVA program into Arduino C++ for a concrete backend."""
@@ -102,6 +103,7 @@ class ArduinoGeneratorBase:
         self.line_map = {}
         self.struct_field_order = {}
         self.task_decl_map = {}
+        self.required_headers = self._collect_required_headers(program)
 
         self.ctx.globals.extend(EmittedLine(line) for line in self._global_prelude_lines())
 
@@ -200,7 +202,167 @@ class ArduinoGeneratorBase:
         return "\n".join(all_lines) + "\n"
 
     def _global_prelude_lines(self) -> List[str]:
-        return ["#include <Arduino.h>", "#include <WiFi.h>", "#include <Wire.h>", ""]
+        return self._global_include_lines()
+
+    def _global_include_lines(self) -> List[str]:
+        includes = ["#include <Arduino.h>"]
+        if "WiFi.h" in self.required_headers:
+            includes.append("#include <WiFi.h>")
+        if "WebServer.h" in self.required_headers:
+            includes.append("#include <WebServer.h>")
+        if "Wire.h" in self.required_headers:
+            includes.append("#include <Wire.h>")
+        includes.append("")
+        return includes
+
+    def _collect_required_headers(self, program: Program) -> Set[str]:
+        headers: Set[str] = set()
+        for decl in program.declarations:
+            self._collect_headers_from_decl(decl, headers)
+        return headers
+
+    def _collect_headers_from_decl(self, decl, headers: Set[str]) -> None:
+        if isinstance(decl, TaskDecl):
+            if decl.body is not None:
+                self._collect_headers_from_block(decl.body, headers)
+            return
+        if isinstance(decl, FunctionDecl):
+            self._collect_headers_from_block(decl.body, headers)
+            return
+        if isinstance(decl, LoopBlockDecl):
+            self._collect_headers_from_block(decl.body, headers)
+            return
+        if isinstance(decl, VarDecl):
+            if decl.initializer is not None:
+                self._collect_headers_from_expr(decl.initializer, headers)
+            return
+        if isinstance(decl, BusDecl):
+            if decl.bus_type.upper() == "I2C":
+                headers.add("Wire.h")
+            self._collect_headers_from_expr(decl.sda, headers)
+            self._collect_headers_from_expr(decl.scl, headers)
+            self._collect_headers_from_expr(decl.freq_hz, headers)
+            return
+
+    def _collect_headers_from_block(self, block: BlockStmt, headers: Set[str]) -> None:
+        for stmt in block.statements:
+            self._collect_headers_from_stmt(stmt, headers)
+
+    def _collect_headers_from_stmt(self, stmt, headers: Set[str]) -> None:
+        if isinstance(stmt, VarDecl):
+            if stmt.initializer is not None:
+                self._collect_headers_from_expr(stmt.initializer, headers)
+            return
+        if isinstance(stmt, ExprStmt):
+            self._collect_headers_from_expr(stmt.expression, headers)
+            return
+        if isinstance(stmt, ReturnStmt):
+            if stmt.value is not None:
+                self._collect_headers_from_expr(stmt.value, headers)
+            return
+        if isinstance(stmt, IfStmt):
+            self._collect_headers_from_expr(stmt.condition, headers)
+            self._collect_headers_from_block(stmt.then_branch, headers)
+            if stmt.else_branch is not None:
+                self._collect_headers_from_block(stmt.else_branch, headers)
+            return
+        if isinstance(stmt, MatchStmt):
+            self._collect_headers_from_expr(stmt.value, headers)
+            for arm in stmt.arms:
+                if arm.pattern is not None:
+                    self._collect_headers_from_expr(arm.pattern, headers)
+                self._collect_headers_from_block(arm.body, headers)
+            return
+        if isinstance(stmt, WhileStmt):
+            self._collect_headers_from_expr(stmt.condition, headers)
+            self._collect_headers_from_block(stmt.body, headers)
+            return
+        if isinstance(stmt, ForStmt):
+            if stmt.init is not None:
+                self._collect_headers_from_stmt(stmt.init, headers)
+            if stmt.condition is not None:
+                self._collect_headers_from_expr(stmt.condition, headers)
+            if stmt.update is not None:
+                self._collect_headers_from_expr(stmt.update, headers)
+            self._collect_headers_from_block(stmt.body, headers)
+            return
+        if isinstance(stmt, GpioModeStmt):
+            self._collect_headers_from_expr(stmt.pin, headers)
+            return
+        if isinstance(stmt, DigitalWriteStmt):
+            self._collect_headers_from_expr(stmt.pin, headers)
+            self._collect_headers_from_expr(stmt.value, headers)
+            return
+        if isinstance(stmt, PwmWriteStmt):
+            self._collect_headers_from_expr(stmt.pin, headers)
+            self._collect_headers_from_expr(stmt.duty, headers)
+            if stmt.channel is not None:
+                self._collect_headers_from_expr(stmt.channel, headers)
+            return
+        if isinstance(stmt, RgbWriteStmt):
+            self._collect_headers_from_expr(stmt.pin, headers)
+            self._collect_headers_from_expr(stmt.red, headers)
+            self._collect_headers_from_expr(stmt.green, headers)
+            self._collect_headers_from_expr(stmt.blue, headers)
+            return
+        if isinstance(stmt, DelayStmt):
+            self._collect_headers_from_expr(stmt.milliseconds, headers)
+            return
+        if isinstance(stmt, WifiConnectStmt):
+            headers.add("WiFi.h")
+            self._collect_headers_from_expr(stmt.ssid, headers)
+            self._collect_headers_from_expr(stmt.password, headers)
+            return
+        if isinstance(stmt, UnsafeBlockStmt):
+            self._collect_headers_from_raw_cpp(stmt.raw_cpp, headers)
+            return
+        if isinstance(stmt, BlockStmt):
+            self._collect_headers_from_block(stmt, headers)
+
+    def _collect_headers_from_expr(self, expr: Expr, headers: Set[str]) -> None:
+        if isinstance(expr, IfExpr):
+            self._collect_headers_from_expr(expr.condition, headers)
+            self._collect_headers_from_block(expr.then_block, headers)
+            self._collect_headers_from_expr(expr.then_value, headers)
+            self._collect_headers_from_block(expr.else_block, headers)
+            self._collect_headers_from_expr(expr.else_value, headers)
+            return
+        if isinstance(expr, MemberAccessExpr):
+            self._collect_headers_from_expr(expr.object_expr, headers)
+            return
+        if isinstance(expr, UnaryExpr):
+            self._collect_headers_from_expr(expr.operand, headers)
+            return
+        if isinstance(expr, PostfixExpr):
+            self._collect_headers_from_expr(expr.operand, headers)
+            return
+        if isinstance(expr, CastExpr):
+            self._collect_headers_from_expr(expr.expression, headers)
+            return
+        if isinstance(expr, AssignmentExpr):
+            self._collect_headers_from_expr(expr.target, headers)
+            self._collect_headers_from_expr(expr.value, headers)
+            return
+        if isinstance(expr, BinaryExpr) or isinstance(expr, BitwiseExpr):
+            self._collect_headers_from_expr(expr.left, headers)
+            self._collect_headers_from_expr(expr.right, headers)
+            return
+        if isinstance(expr, CallExpr):
+            self._collect_headers_from_expr(expr.callee, headers)
+            for arg in expr.args:
+                self._collect_headers_from_expr(arg, headers)
+            return
+        if isinstance(expr, StructInitExpr):
+            for _, value_expr in expr.field_initializers:
+                self._collect_headers_from_expr(value_expr, headers)
+
+    def _collect_headers_from_raw_cpp(self, raw_cpp: str, headers: Set[str]) -> None:
+        if "WebServer" in raw_cpp:
+            headers.add("WebServer.h")
+        if "WiFi" in raw_cpp or "WL_CONNECTED" in raw_cpp:
+            headers.add("WiFi.h")
+        if "Wire" in raw_cpp:
+            headers.add("Wire.h")
 
     def _emit_task_function(self, task_decl: TaskDecl) -> List[EmittedLine]:
         out: List[EmittedLine] = [EmittedLine(f"void __task_{task_decl.name}(void* pvParameters) {{", task_decl.span)]
@@ -217,7 +379,7 @@ class ArduinoGeneratorBase:
         decl = self.task_decl_map.get(task_name)
         core_expr = self._task_core_expr(decl)
         return (
-            f'xTaskCreatePinnedToCore(__task_{task_name}, "{task_name}", 4096, nullptr, 1, nullptr, {core_expr});'
+            f'xTaskCreatePinnedToCore(__task_{task_name}, "{task_name}", 8192, nullptr, 1, nullptr, {core_expr});'
         )
 
     def _task_core_expr(self, task_decl: Optional[TaskDecl]) -> str:
@@ -522,10 +684,7 @@ class ESP32Generator(ArduinoGeneratorBase):
     """ESP32-specific backend with fast GPIO and RTOS-safe delay."""
 
     def _global_prelude_lines(self) -> List[str]:
-        return [
-            "#include <Arduino.h>",
-            "#include <WiFi.h>",
-            "#include <Wire.h>",
+        return self._global_include_lines() + [
             "#include \"soc/gpio_struct.h\"",
             "",
             "static inline void __dsl_fast_write(uint8_t pin, bool high) {",
@@ -577,7 +736,7 @@ class GenericArduinoGenerator(ArduinoGeneratorBase):
     """Generic Arduino fallback backend with standard API calls."""
 
     def _global_prelude_lines(self) -> List[str]:
-        return ["#include <Arduino.h>", "#include <WiFi.h>", "#include <Wire.h>", ""]
+        return self._global_include_lines()
 
     def _emit_digital_write(self, stmt: DigitalWriteStmt) -> str:
         return f"digitalWrite({self._emit_expr(stmt.pin)}, {self._emit_expr(stmt.value)});"

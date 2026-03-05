@@ -1,0 +1,36 @@
+let __http_port: int = 80;
+let __http_html_payload: string = "<h1>NOVA HTTP Server</h1>";
+
+fn configureWebServer(port: int, htmlPayload: string) -> void {
+    __http_port = port;
+    __http_html_payload = htmlPayload;
+}
+
+@core(0)
+@rate(1ms)
+task startWebServer() {
+    unsafe {
+        while (WiFi.status() != WL_CONNECTED) {
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+        }
+
+        static WebServer* server = nullptr;
+        static bool serverStarted = false;
+
+        if (!serverStarted) {
+            server = new WebServer(__http_port);
+            server->on("/", []() {
+                server->send(200, "text/html", __http_html_payload.c_str());
+            });
+            server->begin();
+            serverStarted = true;
+        }
+
+        while (true) {
+            if (server != nullptr) {
+                server->handleClient();
+            }
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+        }
+    }
+}

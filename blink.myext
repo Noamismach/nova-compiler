@@ -1,0 +1,27 @@
+let NEO_PIN: int = 48;
+
+loop {
+    // מעבר מאדום לירוק
+    for (let i: int = 0; i < 255; i = i + 5) {
+        let r: int = 255 - i;
+        let g: int = i;
+        rgbWrite(NEO_PIN, r, g, 0);
+        delay(20);
+    }
+
+    // מעבר מירוק לכחול
+    for (let i: int = 0; i < 255; i = i + 5) {
+        let g: int = 255 - i;
+        let b: int = i;
+        rgbWrite(NEO_PIN, 0, g, b);
+        delay(20);
+    }
+
+    // מעבר מכחול לאדום
+    for (let i: int = 0; i < 255; i = i + 5) {
+        let b: int = 255 - i;
+        let r: int = i;
+        rgbWrite(NEO_PIN, r, 0, b);
+        delay(20);
+    }
+}

@@ -40,7 +40,7 @@ class CompileArtifacts:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """Create argument parser with build/transpile/check subcommands."""
+    """Create argument parser with build/transpile/check/monitor subcommands."""
 
     parser = argparse.ArgumentParser(prog="mycompiler", description="ESP32 DSL compiler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -65,6 +65,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     build_cmd.add_argument("--upload", action="store_true", help="Upload after successful compile")
     build_cmd.add_argument("--target", choices=["esp32", "generic"], default="esp32", help="Codegen target backend")
     build_cmd.add_argument("--board", choices=board_choices, default="esp32", help="Hardware profile for semantic checks")
+
+    monitor_cmd = sub.add_parser("monitor", help="Open a live serial monitor using arduino-cli")
+    monitor_cmd.add_argument("--port", required=True, help="Serial port (for example COM6)")
+    monitor_cmd.add_argument("--baud", type=int, default=115200, help="Serial baud rate")
 
     return parser
 
@@ -254,15 +258,70 @@ def run_arduino_cli_upload(source_cpp: Path, fqbn: str, port: str, line_map: Dic
     return _run_cli_with_json_diagnostics(cmd, line_map, sketch_dir)
 
 
+def run_arduino_cli_monitor(port: str, baud: int) -> int:
+    """Open a live serial monitor session and stream board output."""
+
+    cmd = [
+        "arduino-cli",
+        "monitor",
+        "-p",
+        port,
+        "--config",
+        f"baudrate={baud}",
+    ]
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError:
+        print(
+            "[arduino-cli:error] 'arduino-cli' executable not found. Install Arduino CLI and ensure it is on PATH.",
+            file=sys.stderr,
+        )
+        return 127
+
+    print(f"[arduino-cli:info] Opening serial monitor on {port} @ {baud} baud. Press Ctrl+C to exit.")
+    try:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.rstrip("\r\n")
+            if line:
+                print(line)
+        return process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        print("[arduino-cli:info] Serial monitor closed.")
+        return 0
+
+
 def materialize_arduino_sketch(source_cpp: Path) -> Path:
-    """Create an Arduino sketch directory with an .ino file from generated C++."""
+    """Create an Arduino sketch directory from generated C++ output.
+
+    The generated program is stored in a `.cpp` translation unit to avoid Arduino
+    preprocessor auto-prototype rewriting of `.ino` files, which can break custom
+    type signatures (for example struct parameters).
+    """
 
     source_cpp = source_cpp.resolve()
     sketch_dir = source_cpp.parent / f"{source_cpp.stem}_sketch"
     sketch_dir.mkdir(parents=True, exist_ok=True)
 
+    cpp_path = sketch_dir / "nova_generated.cpp"
+    cpp_path.write_text(source_cpp.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # Keep an .ino entrypoint file because arduino-cli expects a sketch file.
     ino_path = sketch_dir / f"{sketch_dir.name}.ino"
-    ino_path.write_text(source_cpp.read_text(encoding="utf-8"), encoding="utf-8")
+    ino_path.write_text("// NOVA sketch stub. Implementation is in nova_generated.cpp\n", encoding="utf-8")
     return sketch_dir
 
 
@@ -273,8 +332,37 @@ def _run_cli_with_json_diagnostics(
 ) -> int:
     """Run arduino-cli command and remap generated .ino diagnostics back to DSL lines."""
 
+    def _print_cli_line(raw_line: str) -> None:
+        line = raw_line.strip()
+        if not line:
+            return
+
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            if not _print_mapped_text(line, line_map, sketch_dir):
+                print(f"[arduino-cli:info] {line}")
+            return
+
+        if isinstance(payload, dict):
+            message = payload.get("message") or payload.get("error") or str(payload)
+            level = str(payload.get("level", "info")).lower()
+        else:
+            message = str(payload)
+            level = "info"
+
+        prefix = "error" if level in {"error", "fatal"} else "info"
+        if not _print_mapped_text(message, line_map, sketch_dir, prefix):
+            print(f"[arduino-cli:{prefix}] {message}")
+
     try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
     except FileNotFoundError:
         print(
             "[arduino-cli:error] 'arduino-cli' executable not found. Install Arduino CLI and ensure it is on PATH.",
@@ -282,29 +370,20 @@ def _run_cli_with_json_diagnostics(
         )
         return 127
 
-    def _print_stream(raw: str) -> None:
-        for line in raw.splitlines():
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                if line.strip():
-                    _print_mapped_text(line, line_map, sketch_dir)
-                continue
-
-            if isinstance(payload, dict):
-                message = payload.get("message") or payload.get("error") or str(payload)
-                level = payload.get("level", "info")
-            else:
-                message = str(payload)
-                level = "info"
-            prefix = "error" if level in {"error", "fatal"} else "info"
-            printed = _print_mapped_text(message, line_map, sketch_dir, prefix)
-            if not printed:
-                print(f"[arduino-cli:{prefix}] {message}")
-
-    _print_stream(completed.stdout)
-    _print_stream(completed.stderr)
-    return completed.returncode
+    try:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            _print_cli_line(raw_line)
+        return process.wait()
+    except KeyboardInterrupt:
+        print("[arduino-cli:error] Build interrupted by user.", file=sys.stderr)
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        return 130
 
 
 def _print_mapped_text(
@@ -345,7 +424,7 @@ def _print_mapped_text(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI main entrypoint for check, transpile, and build workflows."""
+    """CLI main entrypoint for check, transpile, build, and monitor workflows."""
 
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -382,6 +461,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return result
 
         return 0
+
+    if args.command == "monitor":
+        return run_arduino_cli_monitor(args.port, args.baud)
 
     parser.error(f"Unknown command: {args.command}")
     return 2
