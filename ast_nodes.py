@@ -45,12 +45,16 @@ class Program(Node):
 
 @dataclass
 class ImportDecl(Decl):
+    """Module import declaration resolved by the module graph layer."""
+
     span: SourceSpan
     module_path: str
 
 
 @dataclass
 class StructField(Node):
+    """Single field in a struct declaration."""
+
     span: SourceSpan
     name: str
     type_name: str
@@ -67,6 +71,8 @@ class StructDecl(Decl):
 
 @dataclass
 class TaskDecorator(Node):
+    """Decorator metadata attached to task declarations (for example core/rate)."""
+
     span: SourceSpan
     name: str
     value: Expr
@@ -84,6 +90,8 @@ class TaskDecl(Decl):
 
 @dataclass
 class DeviceDecl(Node):
+    """Declarative peripheral node nested under a bus declaration."""
+
     span: SourceSpan
     name: str
     address: Expr
@@ -91,6 +99,8 @@ class DeviceDecl(Node):
 
 @dataclass
 class BusDecl(Decl):
+    """Hardware bus declaration with optional child devices."""
+
     span: SourceSpan
     bus_type: str
     name: str
@@ -102,6 +112,8 @@ class BusDecl(Decl):
 
 @dataclass
 class Param(Node):
+    """Function parameter with explicit type annotation."""
+
     span: SourceSpan
     name: str
     type_name: str
@@ -120,6 +132,8 @@ class FunctionDecl(Decl):
 
 @dataclass
 class LoopBlockDecl(Decl):
+    """Top-level loop declaration lowered to Arduino `loop()` body."""
+
     span: SourceSpan
     body: "BlockStmt"
 

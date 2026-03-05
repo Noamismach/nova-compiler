@@ -8,8 +8,8 @@ fn hashSha256(payload: string) -> void {
             delay(50);
         }
 
-        // mbedTLS digest API is backed by ESP-IDF integration and can route to
-        // hardware acceleration on ESP32-S3 when available.
+        // Use the generic digest facade so ESP-IDF can select optimized backend
+        // paths (including hardware acceleration on supported ESP32-S3 builds).
         const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
         if (mdInfo == nullptr) {
             Serial.println("NOVA: Failed to get SHA-256 descriptor.");

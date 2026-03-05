@@ -21,6 +21,8 @@ from semantic import HARDWARE_PROFILES, SemanticAnalyzer, SemanticIssue
 
 @dataclass(frozen=True)
 class CompilerMessage:
+    """Normalized diagnostic emitted by any compiler pipeline phase."""
+
     stage: str
     severity: str
     message: str
@@ -31,6 +33,8 @@ class CompilerMessage:
 
 @dataclass
 class CompileArtifacts:
+    """Outputs from a compile/check/transpile pass used by CLI commands."""
+
     source_path: Path
     generated_cpp_path: Path
     messages: List[CompilerMessage]
@@ -74,7 +78,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def compile_to_cpp(input_path: Path, out_path: Path, target: str = "esp32", board: str = "esp32") -> CompileArtifacts:
-    """Runs lexer/parser/semantic/codegen and writes generated C++."""
+    """Run module resolution, semantic checks, and backend code generation.
+
+    The function returns diagnostics even when compilation fails, enabling all
+    CLI commands to share one deterministic reporting surface.
+    """
 
     resolver = ModuleGraphResolver(default_extension=".myext")
     graph = resolver.resolve(input_path)

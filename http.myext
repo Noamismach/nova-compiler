@@ -10,7 +10,7 @@ fn configureWebServer(port: int, htmlPayload: string) -> void {
 @rate(1ms)
 task startWebServer() {
     unsafe {
-        // Guard against race conditions: WebServer must start only after WiFi is fully connected.
+        // Guard against race conditions: bind sockets only after WiFi is connected.
         while (WiFi.status() != WL_CONNECTED) {
             vTaskDelay(500 / portTICK_PERIOD_MS);
         }
@@ -21,6 +21,7 @@ task startWebServer() {
 
         if (!serverStarted) {
             server = new WebServer(__http_port);
+            // Keep route callback minimal to avoid long task stalls under request load.
             server->on("/", []() {
                 server->send(200, "text/html", __http_html_payload.c_str());
             });
@@ -32,6 +33,7 @@ task startWebServer() {
             if (server != nullptr) {
                 server->handleClient();
             }
+            // Cooperative yield keeps networking responsive and avoids watchdog trips.
             vTaskDelay(10 / portTICK_PERIOD_MS);
         }
     }

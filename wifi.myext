@@ -5,11 +5,11 @@ struct WiFiConfig {
 
 fn connectWiFi(cfg: WiFiConfig) -> void {
     unsafe {
-        // WiFi headers are injected by NOVA code generation prelude.
+        // WiFi headers are injected by the NOVA global prelude when usage is detected.
         Serial.begin(115200);
         Serial.println("NOVA: Connecting to WiFi...");
         WiFi.begin(cfg.ssid.c_str(), cfg.password.c_str());
-        // Block until the ESP32 network stack reports a stable association.
+        // Block until the ESP32 station reaches an associated + IP-ready state.
         while (WiFi.status() != WL_CONNECTED) {
             Serial.println("NOVA: waiting for WL_CONNECTED...");
             delay(500);

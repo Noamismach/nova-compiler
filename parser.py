@@ -54,6 +54,8 @@ from lexer import Token, TokenType
 
 @dataclass(frozen=True)
 class ParseError:
+    """Single parser diagnostic with source coordinates."""
+
     message: str
     line: int
     column: int
@@ -119,6 +121,8 @@ class Parser:
             return None
 
     def _import_decl(self) -> ImportDecl:
+        """Parse `import "path";` declarations."""
+
         token = self._consume(TokenType.STRING, "Expected module path string after import")
         semicolon = self._consume(TokenType.SEMICOLON, "Expected ';' after import declaration")
         span = self._span_from_tokens(token, semicolon)
@@ -158,6 +162,8 @@ class Parser:
         )
 
     def _task_decorators(self) -> List[TaskDecorator]:
+        """Parse leading `@decorator(value)` nodes before a task declaration."""
+
         decorators: List[TaskDecorator] = []
         while self._match(TokenType.AT):
             at_tok = self._previous()
@@ -175,6 +181,8 @@ class Parser:
         return decorators
 
     def _task_decl(self, decorators: List[TaskDecorator]) -> TaskDecl:
+        """Parse a task declaration and attach already parsed decorators."""
+
         name_tok = self._consume(TokenType.IDENT, "Expected task name")
         self._consume(TokenType.LPAREN, "Expected '(' after task name")
         self._consume(TokenType.RPAREN, "Expected ')' after task parameters")
@@ -182,6 +190,8 @@ class Parser:
         return TaskDecl(span=self._span_from_tokens(name_tok, body.span), name=name_tok.lexeme, decorators=decorators, body=body)
 
     def _bus_decl(self) -> BusDecl:
+        """Parse a declarative bus block including nested device declarations."""
+
         start = self._previous()
         bus_type_tok = self._consume_any([TokenType.I2C, TokenType.SPI, TokenType.IDENT], "Expected bus type (I2C/SPI)")
         bus_name = self._consume(TokenType.IDENT, "Expected bus name")
@@ -224,6 +234,8 @@ class Parser:
         )
 
     def _device_decl(self) -> DeviceDecl:
+        """Parse one `device` entry nested inside a `bus` declaration."""
+
         start = self._previous()
         device_name = self._consume(TokenType.IDENT, "Expected device name")
         self._consume(TokenType.LBRACE, "Expected '{' to start device declaration")
@@ -261,6 +273,8 @@ class Parser:
         return self._expression()
 
     def _struct_decl(self) -> StructDecl:
+        """Parse a struct declaration with typed named fields."""
+
         name_tok = self._consume(TokenType.IDENT, "Expected struct name")
         self._consume(TokenType.LBRACE, "Expected '{' after struct name")
         fields: List[StructField] = []

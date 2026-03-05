@@ -203,6 +203,8 @@ class ArduinoGeneratorBase:
         return "\n".join(all_lines) + "\n"
 
     def _global_prelude_lines(self) -> List[str]:
+        """Return top-of-file prelude lines for the generated translation unit."""
+
         return self._global_include_lines()
 
     def _global_include_lines(self) -> List[str]:
@@ -236,12 +238,16 @@ class ArduinoGeneratorBase:
         if isinstance(decl, TaskDecl):
             if self._is_crypto_symbol(decl.name):
                 headers.add("mbedtls/md.h")
+            if self._is_web_symbol(decl.name):
+                headers.add("WebServer.h")
             if decl.body is not None:
                 self._collect_headers_from_block(decl.body, headers)
             return
         if isinstance(decl, FunctionDecl):
             if self._is_crypto_symbol(decl.name):
                 headers.add("mbedtls/md.h")
+            if self._is_web_symbol(decl.name):
+                headers.add("WebServer.h")
             self._collect_headers_from_block(decl.body, headers)
             return
         if isinstance(decl, LoopBlockDecl):
@@ -344,6 +350,8 @@ class ArduinoGeneratorBase:
         if isinstance(expr, IdentifierExpr):
             if self._is_crypto_symbol(expr.name):
                 headers.add("mbedtls/md.h")
+            if self._is_web_symbol(expr.name):
+                headers.add("WebServer.h")
             return
 
         if isinstance(expr, IfExpr):
@@ -390,13 +398,15 @@ class ArduinoGeneratorBase:
         predictable global prelude.
         """
 
-        if "WebServer" in raw_cpp:
+        lowered = raw_cpp.lower()
+
+        if "webserver" in lowered or "handleclient" in lowered or "server->on(" in lowered:
             headers.add("WebServer.h")
-        if "WiFi" in raw_cpp or "WL_CONNECTED" in raw_cpp:
+        if "wifi" in lowered or "wl_connected" in lowered:
             headers.add("WiFi.h")
-        if "Wire" in raw_cpp:
+        if "wire" in lowered:
             headers.add("Wire.h")
-        if "mbedtls" in raw_cpp or "MBEDTLS_" in raw_cpp:
+        if "mbedtls" in lowered:
             # ESP-IDF wires mbedTLS to hardware crypto accelerators on supported
             # SoCs (including ESP32-S3) behind the standard digest API.
             headers.add("mbedtls/md.h")
@@ -410,6 +420,12 @@ class ArduinoGeneratorBase:
 
         lowered = symbol_name.lower()
         return "crypto" in lowered or "sha256" in lowered or "mbedtls" in lowered
+
+    def _is_web_symbol(self, symbol_name: str) -> bool:
+        """Return True when a symbol implies WebServer support is required."""
+
+        lowered = symbol_name.lower()
+        return "http" in lowered or "web" in lowered or "server" in lowered
 
     def _emit_task_function(self, task_decl: TaskDecl) -> List[EmittedLine]:
         out: List[EmittedLine] = [EmittedLine(f"void __task_{task_decl.name}(void* pvParameters) {{", task_decl.span)]
