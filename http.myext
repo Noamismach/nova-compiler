@@ -10,10 +10,12 @@ fn configureWebServer(port: int, htmlPayload: string) -> void {
 @rate(1ms)
 task startWebServer() {
     unsafe {
+        // Guard against race conditions: WebServer must start only after WiFi is fully connected.
         while (WiFi.status() != WL_CONNECTED) {
             vTaskDelay(500 / portTICK_PERIOD_MS);
         }
 
+        // Heap allocation avoids placing a heavy WebServer instance on task stack.
         static WebServer* server = nullptr;
         static bool serverStarted = false;
 

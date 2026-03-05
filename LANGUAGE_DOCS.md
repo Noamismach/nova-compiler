@@ -13,6 +13,8 @@ This reference includes NOVA 2.0 capabilities:
 - Declarative `bus` and `device` blocks for hardware wiring intent
 - Explicit cast expressions via `as`
 - Raw backend passthrough blocks via `unsafe { ... }`
+- Native networking modules for Wi-Fi and HTTP serving (`wifi.myext`, `http.myext`)
+- Live serial monitor workflow via `cli.py monitor`
 
 ## 1) Variables & Types
 
@@ -347,7 +349,29 @@ Use unsafe blocks for tightly scoped backend-specific escapes when no DSL constr
 
 ---
 
-## 7) Board Profiles and CLI Usage
+## 7) Phase 2 Web Layer (Native Networking)
+
+NOVA Phase 2 ships a standard networking layer for ESP32-class targets.
+
+### Wi-Fi module
+
+- `wifi.myext` defines `WiFiConfig` and `connectWiFi(cfg: WiFiConfig)`.
+- `connectWiFi` blocks until `WL_CONNECTED` to guarantee networking readiness before dependent services start.
+
+### HTTP server module
+
+- `http.myext` provides `configureWebServer(port, htmlPayload)` and task `startWebServer()`.
+- Server startup is race-safe: the task waits for `WiFi.status() == WL_CONNECTED` before calling `begin()`.
+- `WebServer` is heap-allocated to avoid stack pressure inside FreeRTOS task contexts.
+
+### Code generation behavior for networking
+
+- Header includes are emitted at global scope.
+- Codegen infers required includes from the AST/unsafe payload and injects `WiFi.h`, `WebServer.h`, and `Wire.h` only when needed.
+
+---
+
+## 8) Board Profiles and CLI Usage
 
 NOVA semantic checks are board-aware through `--board`.
 
@@ -360,6 +384,7 @@ Example checks/builds:
 ```powershell
 python cli.py check blink.myext --target esp32 --board esp32s3_n16r8
 python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp32:esp32:esp32s3 --upload --port COM6
+python cli.py monitor --port COM6 --baud 115200
 ```
 
 `esp32s3_n16r8` profile notes:
@@ -368,7 +393,7 @@ python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp3
 
 ---
 
-## 8) Fully Working Blink Example (`rgbWrite`)
+## 9) Fully Working Blink Example (`rgbWrite`)
 
 ```nova
 let PIXEL_PIN:int = 48;
@@ -392,7 +417,7 @@ python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp3
 
 ---
 
-## 9) Additional Syntax Notes
+## 10) Additional Syntax Notes
 
 - Statements generally end with `;`.
 - Block syntax is always `{ ... }`.
@@ -414,3 +439,10 @@ return expression;
 - Comments supported by lexer:
   - Line: `// ...`
   - Block: `/* ... */`
+
+---
+
+## 11) Tooling Integration
+
+- Official VS Code extension assets are maintained in `nova-vscode/`.
+- The extension ships syntax grammar and language configuration aligned with this language reference.

@@ -9,6 +9,7 @@ fn connectWiFi(cfg: WiFiConfig) -> void {
         Serial.begin(115200);
         Serial.println("NOVA: Connecting to WiFi...");
         WiFi.begin(cfg.ssid.c_str(), cfg.password.c_str());
+        // Block until the ESP32 network stack reports a stable association.
         while (WiFi.status() != WL_CONNECTED) {
             Serial.println("NOVA: waiting for WL_CONNECTED...");
             delay(500);

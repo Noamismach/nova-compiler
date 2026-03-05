@@ -94,6 +94,7 @@ class ArduinoGeneratorBase:
         self.line_map: Dict[int, SourceMapEntry] = {}
         self.struct_field_order: Dict[str, List[str]] = {}
         self.task_decl_map: Dict[str, TaskDecl] = {}
+        # Populated per-program to emit only the headers actually required by the AST.
         self.required_headers: Set[str] = set()
 
     def generate(self, program: Program) -> GeneratedOutput:
@@ -205,6 +206,8 @@ class ArduinoGeneratorBase:
         return self._global_include_lines()
 
     def _global_include_lines(self) -> List[str]:
+        """Build deterministic global includes from AST-discovered feature usage."""
+
         includes = ["#include <Arduino.h>"]
         if "WiFi.h" in self.required_headers:
             includes.append("#include <WiFi.h>")
@@ -216,12 +219,16 @@ class ArduinoGeneratorBase:
         return includes
 
     def _collect_required_headers(self, program: Program) -> Set[str]:
+        """Scan declarations and statements to infer mandatory backend headers."""
+
         headers: Set[str] = set()
         for decl in program.declarations:
             self._collect_headers_from_decl(decl, headers)
         return headers
 
     def _collect_headers_from_decl(self, decl, headers: Set[str]) -> None:
+        """Collect header needs from top-level declarations."""
+
         if isinstance(decl, TaskDecl):
             if decl.body is not None:
                 self._collect_headers_from_block(decl.body, headers)
@@ -245,10 +252,14 @@ class ArduinoGeneratorBase:
             return
 
     def _collect_headers_from_block(self, block: BlockStmt, headers: Set[str]) -> None:
+        """Collect header needs from each statement in a lexical block."""
+
         for stmt in block.statements:
             self._collect_headers_from_stmt(stmt, headers)
 
     def _collect_headers_from_stmt(self, stmt, headers: Set[str]) -> None:
+        """Collect header needs from one statement node, recursively as needed."""
+
         if isinstance(stmt, VarDecl):
             if stmt.initializer is not None:
                 self._collect_headers_from_expr(stmt.initializer, headers)
@@ -320,6 +331,8 @@ class ArduinoGeneratorBase:
             self._collect_headers_from_block(stmt, headers)
 
     def _collect_headers_from_expr(self, expr: Expr, headers: Set[str]) -> None:
+        """Collect header needs from one expression subtree."""
+
         if isinstance(expr, IfExpr):
             self._collect_headers_from_expr(expr.condition, headers)
             self._collect_headers_from_block(expr.then_block, headers)
@@ -357,6 +370,8 @@ class ArduinoGeneratorBase:
                 self._collect_headers_from_expr(value_expr, headers)
 
     def _collect_headers_from_raw_cpp(self, raw_cpp: str, headers: Set[str]) -> None:
+        """Infer headers from unsafe C++ payloads used by stdlib escape hatches."""
+
         if "WebServer" in raw_cpp:
             headers.add("WebServer.h")
         if "WiFi" in raw_cpp or "WL_CONNECTED" in raw_cpp:
@@ -379,6 +394,7 @@ class ArduinoGeneratorBase:
         decl = self.task_decl_map.get(task_name)
         core_expr = self._task_core_expr(decl)
         return (
+            # Networking and TLS stacks are memory-hungry on ESP32; reserve safer default stack.
             f'xTaskCreatePinnedToCore(__task_{task_name}, "{task_name}", 8192, nullptr, 1, nullptr, {core_expr});'
         )
 

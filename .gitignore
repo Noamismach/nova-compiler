@@ -185,3 +185,6 @@ arduino_build.log
 tmp/
 temp/
 site/
+
+# Local NOVA sandbox test programs (keep local, do not track in git)
+*_test.myext

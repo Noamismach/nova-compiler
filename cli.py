@@ -259,7 +259,12 @@ def run_arduino_cli_upload(source_cpp: Path, fqbn: str, port: str, line_map: Dic
 
 
 def run_arduino_cli_monitor(port: str, baud: int) -> int:
-    """Open a live serial monitor session and stream board output."""
+    """Open a live serial monitor session and stream board output.
+
+    This command is intentionally a thin pass-through over `arduino-cli monitor`
+    so developers can validate runtime state (for example WiFi/IP startup logs)
+    immediately after upload without leaving the NOVA CLI workflow.
+    """
 
     cmd = [
         "arduino-cli",
@@ -319,7 +324,8 @@ def materialize_arduino_sketch(source_cpp: Path) -> Path:
     cpp_path = sketch_dir / "nova_generated.cpp"
     cpp_path.write_text(source_cpp.read_text(encoding="utf-8"), encoding="utf-8")
 
-    # Keep an .ino entrypoint file because arduino-cli expects a sketch file.
+    # Keep a minimal .ino shim because arduino-cli expects a sketch entry file,
+    # while NOVA keeps generated logic in C++ to avoid Arduino prototype rewriting.
     ino_path = sketch_dir / f"{sketch_dir.name}.ino"
     ino_path.write_text("// NOVA sketch stub. Implementation is in nova_generated.cpp\n", encoding="utf-8")
     return sketch_dir

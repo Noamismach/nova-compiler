@@ -41,6 +41,21 @@ NOVA 2.0 expands the language from a single-file control DSL into a modular embe
 - **Module imports**: split programs across files with `import` and compile via topological module graph merge.
 - **Explicit casting and unsafe regions**: use `as` for primitive casts and `unsafe { ... }` for controlled raw backend escape hatches.
 
+## Phase 2: The Web Layer
+
+Phase 2 introduces native networking modules that run directly on ESP32-class hardware:
+
+- **`wifi.myext` standard module**: typed Wi-Fi configuration via `WiFiConfig` and a blocking `connectWiFi(...)` flow.
+- **`http.myext` standard module**: native HTTP serving with route wiring and FreeRTOS-friendly client handling.
+- **Race-safe server startup**: web task startup waits for `WL_CONNECTED` before `WebServer::begin()`.
+- **Heap-backed server allocation**: `WebServer` is allocated off the task stack to reduce crash/reboot risk.
+- **Dynamic include emission**: codegen scans AST/unsafe payloads and injects only required global headers (`WiFi.h`, `WebServer.h`, `Wire.h`).
+
+## Developer Experience
+
+- **Live CLI monitor**: `python cli.py monitor --port COM6 --baud 115200`
+- **Official VS Code Extension**: syntax + language configuration are shipped in `nova-vscode/` for workspace/editor integration.
+
 ---
 
 ## Live Transpilation Simulation
@@ -138,8 +153,9 @@ graph LR
 | Module | Responsibility |
 |---|---|
 | `module_graph.py` | Dependency resolution and topological ordering for multi-file import graphs |
-| `cli.py` | Orchestration layer for `check`, `transpile`, and `build` workflows |
+| `cli.py` | Orchestration layer for `check`, `transpile`, `build`, and live `monitor` workflows |
 | `api.py` | FastAPI backend exposing remote transpilation over HTTP |
+| `nova-vscode/` | Official VS Code extension package (grammar + language configuration) |
 | `DSL_GRAMMAR.ebnf` | Normative grammar specification; ground truth for parser implementation |
 | `LANGUAGE_DOCS.md` | Language reference and semantic contract documentation |
 
@@ -188,12 +204,21 @@ python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp3
 
 Invokes `arduino-cli` for final compilation and upload. Requires a connected device on the specified port.
 
+**Stage 4 - Runtime serial diagnostics (live monitor):**
+
+```powershell
+python cli.py monitor --port COM6 --baud 115200
+```
+
+Streams runtime firmware logs directly from the device over serial.
+
 ### Command Reference
 
 ```powershell
 python cli.py check     <input.myext>  [--target esp32|generic]  [--board <profile>]
 python cli.py transpile <input.myext>  [--target esp32|generic]  [--board <profile>]  [--out <path>]
 python cli.py build     <input.myext>  [--target esp32|generic]  [--board <profile>]  --fqbn <fqbn>  [--upload --port <port>]
+python cli.py monitor   --port <serial-port> [--baud <baudrate>]
 ```
 
 Available board profiles: `esp32`, `esp32s3_n16r8`. Additional profiles follow the naming convention `<soc>_<flash>r<psram>`.
