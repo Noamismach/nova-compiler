@@ -2,6 +2,18 @@
 
 This is the complete reference for NOVA syntax and behavior, aligned with the final AST, parser, semantic analyzer, and code generation pipeline.
 
+## NOVA 2.0 Feature Set
+
+This reference includes NOVA 2.0 capabilities:
+- Multi-file import graph via `import "path";`
+- Struct declarations, struct initialization, and member access
+- Pattern dispatch via `match (...) { ... }` with wildcard arm requirement
+- Value-producing `if` expressions
+- Task declarations with decorators, plus `spawn`
+- Declarative `bus` and `device` blocks for hardware wiring intent
+- Explicit cast expressions via `as`
+- Raw backend passthrough blocks via `unsafe { ... }`
+
 ## 1) Variables & Types
 
 ## Variable declarations (exact)
@@ -25,6 +37,8 @@ Rules:
 - `float`
 - `bool`
 - `string`
+- `Pin`
+- `Duration`
 - `void` (return type only)
 
 ## Literals
@@ -33,6 +47,7 @@ Rules:
 - Float: `3.14`
 - Boolean: `true`, `false`
 - String: `"hello"`
+- Duration: `10ms`, `250us`, `1s`
 
 ## Assignment expression
 
@@ -44,6 +59,20 @@ x = x + 1;
 Rules:
 - Left side must be an identifier.
 - Assignment is type-checked.
+
+Compound assignment and postfix update are supported:
+- `+=`, `-=`, `*=`, `/=`
+- `x++`, `x--`
+
+## Explicit cast
+
+```nova
+let x:int = 3;
+let y:float = x as float;
+```
+
+Rules:
+- `as` currently supports primitive casts among `int`, `float`, `bool`, and `string`.
 
 ---
 
@@ -69,6 +98,20 @@ Rules:
 - Parenthesized condition is required.
 - `else` must be followed by a block.
 - Condition must evaluate to `bool`.
+
+## `if` expression (value form)
+
+```nova
+let x:int = if (flag) {
+    1
+} else {
+    2
+};
+```
+
+Rules:
+- Both branches must produce a value.
+- Branch result types must match.
 
 ## `while` (exact)
 
@@ -121,6 +164,21 @@ loop {
 Semantics:
 - `loop { ... }` maps to Arduino `loop()` body.
 - Top-level executable statements outside `loop` map to Arduino `setup()`.
+
+## `match` statement
+
+```nova
+match (state) {
+    0 => { digitalWrite(2, 0); }
+    1 => { digitalWrite(2, 1); }
+    _ => { digitalWrite(2, 0); }
+}
+```
+
+Rules:
+- Each arm uses `pattern => { ... }`.
+- `_` is the wildcard arm.
+- Wildcard arm is required for exhaustiveness.
 
 ---
 
@@ -196,7 +254,100 @@ Rules:
 
 ---
 
-## 4) Board Profiles and CLI Usage
+## 4) Structs
+
+## Declaration
+
+```nova
+struct Sensor {
+    id: int;
+    threshold: float;
+    enabled: bool;
+}
+```
+
+`let` before struct fields is optional and accepted.
+
+## Initialization and member access
+
+```nova
+let s:Sensor = Sensor(id: 1, threshold: 0.8, enabled: true);
+let en:bool = s.enabled;
+```
+
+Rules:
+- Initializers are named (`field: value`).
+- All required fields must be provided.
+- Unknown or duplicate fields are rejected.
+
+---
+
+## 5) Tasks and Declarative Buses
+
+## Task declaration and spawn
+
+```nova
+@core(1)
+@rate(10ms)
+task blinkTask() {
+    digitalWrite(2, 1);
+    delay(10ms);
+}
+
+spawn blinkTask();
+```
+
+Rules:
+- `@core` must evaluate to `0` or `1` (ESP32 dual-core pinning model).
+- `@rate` expects `Duration` or `int`.
+- Spawn target must be a declared task.
+
+## Bus and device declarations
+
+```nova
+bus I2C sensors {
+    sda: 8;
+    scl: 9;
+    freq: 400k;
+
+    device imu {
+        address: 0x68;
+    }
+}
+```
+
+Rules:
+- Supported bus types: `I2C`, `SPI`.
+- `sda`, `scl`, and `freq` are required bus properties.
+- Reserved board pins are rejected during semantic analysis.
+
+---
+
+## 6) Modules and Unsafe Blocks
+
+## Imports
+
+```nova
+import "drivers/blink";
+```
+
+Rules:
+- Imports are resolved through the module graph.
+- Declarations are merged in dependency topological order.
+
+## Unsafe block
+
+```nova
+unsafe {
+    // Raw target C++ emitted verbatim in backend output
+}
+```
+
+Use unsafe blocks for tightly scoped backend-specific escapes when no DSL construct exists.
+
+---
+
+## 7) Board Profiles and CLI Usage
 
 NOVA semantic checks are board-aware through `--board`.
 
@@ -217,7 +368,7 @@ python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp3
 
 ---
 
-## 5) Fully Working Blink Example (`rgbWrite`)
+## 8) Fully Working Blink Example (`rgbWrite`)
 
 ```nova
 let PIXEL_PIN:int = 48;
@@ -241,7 +392,7 @@ python cli.py build blink.myext --target esp32 --board esp32s3_n16r8 --fqbn esp3
 
 ---
 
-## 6) Additional Syntax Notes
+## 9) Additional Syntax Notes
 
 - Statements generally end with `;`.
 - Block syntax is always `{ ... }`.

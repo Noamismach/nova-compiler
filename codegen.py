@@ -7,10 +7,14 @@ from typing import Dict, List, Optional
 
 from ast_nodes import (
     AssignmentExpr,
+    BitwiseExpr,
     BinaryExpr,
     BlockStmt,
+    BusDecl,
+    CastExpr,
     CallExpr,
     DelayStmt,
+    DeviceDecl,
     DigitalWriteStmt,
     Expr,
     ExprStmt,
@@ -18,14 +22,23 @@ from ast_nodes import (
     FunctionDecl,
     GpioModeStmt,
     IdentifierExpr,
+    IfExpr,
     IfStmt,
     LiteralExpr,
     LoopBlockDecl,
+    MemberAccessExpr,
+    MatchStmt,
+    PostfixExpr,
     Program,
     PwmWriteStmt,
     RgbWriteStmt,
     ReturnStmt,
     SourceSpan,
+    StructDecl,
+    StructInitExpr,
+    SpawnStmt,
+    TaskDecl,
+    TaskDecorator,
     UnaryExpr,
     UnsafeBlockStmt,
     VarDecl,
@@ -36,6 +49,8 @@ from ast_nodes import (
 
 @dataclass(frozen=True)
 class SourceMapEntry:
+    """Maps one generated C++ line back to original DSL source coordinates."""
+
     file_path: str
     line: int
     column: int
@@ -43,6 +58,8 @@ class SourceMapEntry:
 
 @dataclass
 class GeneratedOutput:
+    """Final emitted C++ translation unit and generated-to-source line mapping."""
+
     code: str
     line_map: Dict[int, SourceMapEntry]
 
@@ -75,17 +92,57 @@ class ArduinoGeneratorBase:
     def __init__(self) -> None:
         self.ctx = GenerationContext()
         self.line_map: Dict[int, SourceMapEntry] = {}
+        self.struct_field_order: Dict[str, List[str]] = {}
+        self.task_decl_map: Dict[str, TaskDecl] = {}
 
     def generate(self, program: Program) -> GeneratedOutput:
+        """Lower a parsed NOVA program into Arduino C++ for a concrete backend."""
+
+        self.ctx = GenerationContext()
+        self.line_map = {}
+        self.struct_field_order = {}
+        self.task_decl_map = {}
+
         self.ctx.globals.extend(EmittedLine(line) for line in self._global_prelude_lines())
 
+        # First pass: capture struct layouts so later struct literals can be ordered deterministically.
         for decl in program.declarations:
+            if isinstance(decl, StructDecl):
+                self.struct_field_order[decl.name] = [field.name for field in decl.fields]
+                self.ctx.globals.extend(self._emit_struct_decl(decl))
+                self.ctx.globals.append(EmittedLine(""))
+
+        # Second pass: predeclare task entrypoints before setup()/loop() emission.
+        for decl in program.declarations:
+            if isinstance(decl, TaskDecl):
+                self.task_decl_map[decl.name] = decl
+                self.ctx.globals.append(EmittedLine(f"void __task_{decl.name}(void* pvParameters);", decl.span))
+
+        if self.task_decl_map:
+            self.ctx.globals.append(EmittedLine(""))
+
+        for decl in program.declarations:
+            if isinstance(decl, StructDecl):
+                continue
+            if isinstance(decl, TaskDecl):
+                self.ctx.functions.append(self._emit_task_function(decl))
+                self.ctx.setup_lines.append(EmittedLine(self._emit_task_spawn_line(decl.name), decl.span))
+                continue
+            if isinstance(decl, BusDecl):
+                if decl.bus_type.upper() == "I2C":
+                    self.ctx.setup_lines.append(
+                        EmittedLine(
+                            f"Wire.begin({self._emit_expr(decl.sda)}, {self._emit_expr(decl.scl)}, {self._emit_expr(decl.freq_hz)});",
+                            decl.span,
+                        )
+                    )
+                continue
             if isinstance(decl, FunctionDecl):
                 self.ctx.functions.append(self._emit_function(decl))
             elif isinstance(decl, LoopBlockDecl):
                 self.ctx.loop_lines.extend(self._emit_block(decl.body))
             elif isinstance(decl, VarDecl):
-                self.ctx.globals.append(EmittedLine(self._emit_var_decl(decl), decl.span))
+                self.ctx.globals.append(EmittedLine(self._emit_var_decl(decl, is_global=True), decl.span))
             else:
                 self.ctx.setup_lines.extend(self._emit_stmt(decl))
 
@@ -93,6 +150,8 @@ class ArduinoGeneratorBase:
         return GeneratedOutput(code=code, line_map=self.line_map)
 
     def _compose_translation_unit(self) -> str:
+        """Assemble all generated sections into one valid Arduino translation unit."""
+
         all_lines: List[str] = []
         generated_line = 1
 
@@ -141,7 +200,52 @@ class ArduinoGeneratorBase:
         return "\n".join(all_lines) + "\n"
 
     def _global_prelude_lines(self) -> List[str]:
-        return ["#include <Arduino.h>", "#include <WiFi.h>", ""]
+        return ["#include <Arduino.h>", "#include <WiFi.h>", "#include <Wire.h>", ""]
+
+    def _emit_task_function(self, task_decl: TaskDecl) -> List[EmittedLine]:
+        out: List[EmittedLine] = [EmittedLine(f"void __task_{task_decl.name}(void* pvParameters) {{", task_decl.span)]
+        out.append(EmittedLine("  for (;;) {", task_decl.span))
+        if task_decl.body is not None:
+            for line in self._emit_block(task_decl.body):
+                out.append(EmittedLine(f"    {line.text}", line.span))
+        out.append(EmittedLine(f"    vTaskDelay(pdMS_TO_TICKS({self._task_rate_ms_expr(task_decl)}));", task_decl.span))
+        out.append(EmittedLine("  }", task_decl.span))
+        out.append(EmittedLine("}", task_decl.span))
+        return out
+
+    def _emit_task_spawn_line(self, task_name: str) -> str:
+        decl = self.task_decl_map.get(task_name)
+        core_expr = self._task_core_expr(decl)
+        return (
+            f'xTaskCreatePinnedToCore(__task_{task_name}, "{task_name}", 4096, nullptr, 1, nullptr, {core_expr});'
+        )
+
+    def _task_core_expr(self, task_decl: Optional[TaskDecl]) -> str:
+        if task_decl is None:
+            return "tskNO_AFFINITY"
+        for decorator in task_decl.decorators:
+            if decorator.name == "core":
+                return self._emit_expr(decorator.value)
+        return "tskNO_AFFINITY"
+
+    def _task_rate_ms_expr(self, task_decl: TaskDecl) -> str:
+        for decorator in task_decl.decorators:
+            if decorator.name != "rate":
+                continue
+            value = decorator.value
+            if isinstance(value, LiteralExpr):
+                if value.type_name == "int":
+                    return str(int(value.value))
+                if value.type_name.lower() == "duration" and isinstance(value.value, dict):
+                    unit = str(value.value.get("unit", "ms"))
+                    amount = int(value.value.get("value", 0))
+                    if unit == "us":
+                        return str(max(1, amount // 1000))
+                    if unit == "s":
+                        return str(amount * 1000)
+                    return str(amount)
+            return self._emit_expr(value)
+        return "1"
 
     def _emit_function(self, fn: FunctionDecl) -> List[EmittedLine]:
         out: List[EmittedLine] = []
@@ -164,8 +268,14 @@ class ArduinoGeneratorBase:
         return out
 
     def _emit_stmt(self, stmt) -> List[EmittedLine]:
+        """Lower one statement node into one or more C++ lines."""
+
+        if isinstance(stmt, StructDecl) or isinstance(stmt, TaskDecl) or isinstance(stmt, BusDecl):
+            return []
+        if isinstance(stmt, SpawnStmt):
+            return [EmittedLine(self._emit_task_spawn_line(stmt.task_name), stmt.span)]
         if isinstance(stmt, VarDecl):
-            return [EmittedLine(self._emit_var_decl(stmt), stmt.span)]
+            return [EmittedLine(self._emit_var_decl(stmt, is_global=False), stmt.span)]
         if isinstance(stmt, ExprStmt):
             return [EmittedLine(f"{self._emit_expr(stmt.expression)};", stmt.span)]
         if isinstance(stmt, ReturnStmt):
@@ -179,6 +289,19 @@ class ArduinoGeneratorBase:
                 lines.append(EmittedLine("else {", stmt.else_branch.span))
                 lines.extend(EmittedLine(f"  {line.text}", line.span) for line in self._emit_block(stmt.else_branch))
                 lines.append(EmittedLine("}", stmt.else_branch.span))
+            return lines
+        if isinstance(stmt, MatchStmt):
+            lines: List[EmittedLine] = [EmittedLine(f"switch ({self._emit_expr(stmt.value)}) {{", stmt.span)]
+            for arm in stmt.arms:
+                if arm.is_wildcard:
+                    lines.append(EmittedLine("default: {", arm.span))
+                else:
+                    pattern_text = self._emit_expr(arm.pattern) if arm.pattern is not None else "0"
+                    lines.append(EmittedLine(f"case {pattern_text}: {{", arm.span))
+                lines.extend(EmittedLine(f"  {line.text}", line.span) for line in self._emit_block(arm.body))
+                lines.append(EmittedLine("  break;", arm.span))
+                lines.append(EmittedLine("}", arm.span))
+            lines.append(EmittedLine("}", stmt.span))
             return lines
         if isinstance(stmt, WhileStmt):
             lines: List[EmittedLine] = [EmittedLine(f"while ({self._emit_expr(stmt.condition)}) {{", stmt.span)]
@@ -207,8 +330,11 @@ class ArduinoGeneratorBase:
         if isinstance(stmt, DelayStmt):
             return [EmittedLine(self._emit_delay(stmt), stmt.span)]
         if isinstance(stmt, UnsafeBlockStmt):
-            lines = stmt.raw_cpp.splitlines() or [""]
-            return [EmittedLine(line, stmt.span) for line in lines]
+            lines = [EmittedLine("{", stmt.span)]
+            for line in (stmt.raw_cpp.splitlines() or [""]):
+                lines.append(EmittedLine(f"  {line}", stmt.span))
+            lines.append(EmittedLine("}", stmt.span))
+            return lines
         if isinstance(stmt, BlockStmt):
             lines = [EmittedLine("{", stmt.span)]
             lines.extend(EmittedLine(f"  {line.text}", line.span) for line in self._emit_block(stmt))
@@ -220,38 +346,128 @@ class ArduinoGeneratorBase:
         if init_stmt is None:
             return ""
         if isinstance(init_stmt, VarDecl):
-            return self._emit_var_decl(init_stmt).rstrip(";")
+            return self._emit_var_decl(init_stmt, is_global=False).rstrip(";")
         if isinstance(init_stmt, ExprStmt):
             return self._emit_expr(init_stmt.expression)
         return ""
 
-    def _emit_var_decl(self, decl: VarDecl) -> str:
+    def _emit_var_decl(self, decl: VarDecl, is_global: bool) -> str:
         cpp_type = self._map_type(decl.type_name or "int")
+        qualifiers: List[str] = []
+        if decl.is_const:
+            qualifiers.append("const")
+        if decl.is_volatile:
+            qualifiers.append("volatile")
+        qualifier_prefix = " ".join(qualifiers)
+        if qualifier_prefix:
+            qualifier_prefix += " "
+
         init = ""
         if decl.initializer is not None:
-            init = f" = {self._emit_expr(decl.initializer)}"
-        return f"{cpp_type} {decl.name}{init};"
+            if isinstance(decl.initializer, StructInitExpr):
+                init_values = ", ".join(self._emit_expr(value_expr) for value_expr in self._ordered_struct_values(decl.initializer))
+                init = f" = {{{init_values}}}"
+            else:
+                init = f" = {self._emit_expr(decl.initializer)}"
+
+        progmem = " PROGMEM" if is_global and decl.is_const else ""
+        return f"{qualifier_prefix}{cpp_type} {decl.name}{progmem}{init};"
 
     def _emit_expr(self, expr: Expr) -> str:
+        """Lower expression nodes to C++ expression text."""
+
         if isinstance(expr, IdentifierExpr):
             return expr.name
+        if isinstance(expr, MemberAccessExpr):
+            return f"({self._emit_expr(expr.object_expr)}.{expr.member_name})"
+        if isinstance(expr, IfExpr):
+            cond = self._emit_expr(expr.condition)
+            then_value = self._emit_expr(expr.then_value)
+            else_value = self._emit_expr(expr.else_value)
+
+            if not expr.then_block.statements and not expr.else_block.statements:
+                return f"(({cond}) ? ({then_value}) : ({else_value}))"
+
+            then_prelude = self._emit_expr_block_prelude(expr.then_block)
+            else_prelude = self._emit_expr_block_prelude(expr.else_block)
+            return (
+                "([&]() { "
+                f"if ({cond}) {{ {then_prelude}return {then_value}; }} "
+                f"else {{ {else_prelude}return {else_value}; }} "
+                "})()"
+            )
         if isinstance(expr, LiteralExpr):
             if expr.type_name == "string":
                 return f'"{str(expr.value)}"'
             if expr.type_name == "bool":
                 return "true" if bool(expr.value) else "false"
+            if expr.type_name.lower() == "duration" and isinstance(expr.value, dict):
+                return str(int(expr.value.get("value", 0)))
             return str(expr.value)
         if isinstance(expr, UnaryExpr):
             return f"({expr.operator}{self._emit_expr(expr.operand)})"
+        if isinstance(expr, PostfixExpr):
+            return f"({self._emit_expr(expr.operand)}{expr.operator})"
         if isinstance(expr, BinaryExpr):
             return f"({self._emit_expr(expr.left)} {expr.operator} {self._emit_expr(expr.right)})"
+        if isinstance(expr, BitwiseExpr):
+            return f"({self._emit_expr(expr.left)} {expr.operator} {self._emit_expr(expr.right)})"
+        if isinstance(expr, CastExpr):
+            return f"(({self._map_type(expr.target_type)})({self._emit_expr(expr.expression)}))"
         if isinstance(expr, AssignmentExpr):
-            return f"({expr.target.name} = {self._emit_expr(expr.value)})"
+            value = self._emit_expr(expr.value)
+            target = self._emit_assignment_target(expr.target)
+            if expr.operator == "=":
+                return f"({target} = {value})"
+
+            op_map = {
+                "+=": "+",
+                "-=": "-",
+                "*=": "*",
+                "/=": "/",
+            }
+            lowered = op_map.get(expr.operator)
+            if lowered is None:
+                return f"({target} {expr.operator} {value})"
+            return f"({target} = ({target} {lowered} {value}))"
+        if isinstance(expr, StructInitExpr):
+            init_values = ", ".join(self._emit_expr(value_expr) for value_expr in self._ordered_struct_values(expr))
+            return f"{self._map_type(expr.type_name)}{{{init_values}}}"
         if isinstance(expr, CallExpr):
             callee = self._emit_expr(expr.callee)
             args = ", ".join(self._emit_expr(arg) for arg in expr.args)
             return f"{callee}({args})"
         return "0"
+
+    def _emit_assignment_target(self, target: Expr) -> str:
+        if isinstance(target, IdentifierExpr):
+            return target.name
+        if isinstance(target, MemberAccessExpr):
+            return f"{self._emit_expr(target.object_expr)}.{target.member_name}"
+        return self._emit_expr(target)
+
+    def _emit_expr_block_prelude(self, block: BlockStmt) -> str:
+        emitted_chunks: List[str] = []
+        for stmt in block.statements:
+            for line in self._emit_stmt(stmt):
+                emitted_chunks.append(line.text)
+        if not emitted_chunks:
+            return ""
+        return " ".join(emitted_chunks) + " "
+
+    def _ordered_struct_values(self, init_expr: StructInitExpr) -> List[Expr]:
+        provided = {field_name: field_value for field_name, field_value in init_expr.field_initializers}
+        expected_order = self.struct_field_order.get(init_expr.type_name)
+        if not expected_order:
+            return [value for _, value in init_expr.field_initializers]
+        return [provided[name] for name in expected_order if name in provided]
+
+    def _emit_struct_decl(self, decl: StructDecl) -> List[EmittedLine]:
+        lines: List[EmittedLine] = [EmittedLine(f"struct {decl.name} {{", decl.span)]
+        for field in decl.fields:
+            lines.append(EmittedLine(f"  {self._map_type(field.type_name)} {field.name};", field.span))
+        lines.append(EmittedLine("};", decl.span))
+        return lines
 
     def _map_type(self, type_name: str) -> str:
         mapping = {
@@ -260,13 +476,25 @@ class ArduinoGeneratorBase:
             "bool": "bool",
             "string": "String",
             "void": "void",
+            "pin": "uint8_t",
+            "duration": "uint32_t",
         }
-        return mapping.get(type_name, type_name)
+        return mapping.get(type_name.lower(), type_name)
 
     def _emit_digital_write(self, stmt: DigitalWriteStmt) -> str:
         return f"digitalWrite({self._emit_expr(stmt.pin)}, {self._emit_expr(stmt.value)});"
 
     def _emit_delay(self, stmt: DelayStmt) -> str:
+        if isinstance(stmt.milliseconds, LiteralExpr) and stmt.milliseconds.type_name.lower() == "duration":
+            raw_value = stmt.milliseconds.value
+            if isinstance(raw_value, dict):
+                unit = str(raw_value.get("unit", "ms"))
+                value = int(raw_value.get("value", 0))
+                if unit == "us":
+                    return f"delayMicroseconds({value});"
+                if unit == "s":
+                    return f"delay({value * 1000});"
+                return f"delay({value});"
         return f"delay({self._emit_expr(stmt.milliseconds)});"
 
     def _emit_pwm_write(self, stmt: PwmWriteStmt) -> List[str]:
@@ -297,6 +525,7 @@ class ESP32Generator(ArduinoGeneratorBase):
         return [
             "#include <Arduino.h>",
             "#include <WiFi.h>",
+            "#include <Wire.h>",
             "#include \"soc/gpio_struct.h\"",
             "",
             "static inline void __dsl_fast_write(uint8_t pin, bool high) {",
@@ -318,7 +547,7 @@ class ESP32Generator(ArduinoGeneratorBase):
         return f"__dsl_fast_write(static_cast<uint8_t>({pin}), static_cast<bool>({value}));"
 
     def _emit_delay(self, stmt: DelayStmt) -> str:
-        return f"vTaskDelay(pdMS_TO_TICKS({self._emit_expr(stmt.milliseconds)}));"
+        return super()._emit_delay(stmt)
 
     def _emit_wifi_connect(self, stmt: WifiConnectStmt) -> List[str]:
         ssid = self._emit_expr(stmt.ssid)
@@ -348,13 +577,13 @@ class GenericArduinoGenerator(ArduinoGeneratorBase):
     """Generic Arduino fallback backend with standard API calls."""
 
     def _global_prelude_lines(self) -> List[str]:
-        return ["#include <Arduino.h>", "#include <WiFi.h>", ""]
+        return ["#include <Arduino.h>", "#include <WiFi.h>", "#include <Wire.h>", ""]
 
     def _emit_digital_write(self, stmt: DigitalWriteStmt) -> str:
         return f"digitalWrite({self._emit_expr(stmt.pin)}, {self._emit_expr(stmt.value)});"
 
     def _emit_delay(self, stmt: DelayStmt) -> str:
-        return f"delay({self._emit_expr(stmt.milliseconds)});"
+        return super()._emit_delay(stmt)
 
     def _emit_pwm_write(self, stmt: PwmWriteStmt) -> List[str]:
         pin = self._emit_expr(stmt.pin)

@@ -17,6 +17,8 @@ class TokenType(Enum):
     FALSE = auto()
 
     LET = auto()
+    CONST = auto()
+    VOLATILE = auto()
     FN = auto()
     RETURN = auto()
     IF = auto()
@@ -24,6 +26,15 @@ class TokenType(Enum):
     WHILE = auto()
     FOR = auto()
     LOOP = auto()
+    STRUCT = auto()
+    MATCH = auto()
+    AS = auto()
+    TASK = auto()
+    SPAWN = auto()
+    BUS = auto()
+    DEVICE = auto()
+    I2C = auto()
+    SPI = auto()
     IMPORT = auto()
     UNSAFE = auto()
     UNSAFE_BLOCK = auto()
@@ -48,14 +59,28 @@ class TokenType(Enum):
     SEMICOLON = auto()
     COLON = auto()
     ARROW = auto()
+    FAT_ARROW = auto()
+    AT = auto()
 
     PLUS = auto()
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
     MOD = auto()
+    BIT_AND = auto()
+    BIT_OR = auto()
+    BIT_XOR = auto()
+    SHIFT_LEFT = auto()
+    SHIFT_RIGHT = auto()
+    BIT_NOT = auto()
     BANG = auto()
     ASSIGN = auto()
+    PLUS_ASSIGN = auto()
+    MINUS_ASSIGN = auto()
+    STAR_ASSIGN = auto()
+    SLASH_ASSIGN = auto()
+    INC = auto()
+    DEC = auto()
 
     EQ = auto()
     NEQ = auto()
@@ -65,10 +90,13 @@ class TokenType(Enum):
     GTE = auto()
     AND = auto()
     OR = auto()
+    DURATION = auto()
 
 
 KEYWORDS: Dict[str, TokenType] = {
     "let": TokenType.LET,
+    "const": TokenType.CONST,
+    "volatile": TokenType.VOLATILE,
     "fn": TokenType.FN,
     "return": TokenType.RETURN,
     "if": TokenType.IF,
@@ -76,6 +104,15 @@ KEYWORDS: Dict[str, TokenType] = {
     "while": TokenType.WHILE,
     "for": TokenType.FOR,
     "loop": TokenType.LOOP,
+    "struct": TokenType.STRUCT,
+    "match": TokenType.MATCH,
+    "as": TokenType.AS,
+    "task": TokenType.TASK,
+    "spawn": TokenType.SPAWN,
+    "bus": TokenType.BUS,
+    "device": TokenType.DEVICE,
+    "I2C": TokenType.I2C,
+    "SPI": TokenType.SPI,
     "import": TokenType.IMPORT,
     "unsafe": TokenType.UNSAFE,
     "true": TokenType.TRUE,
@@ -94,6 +131,8 @@ KEYWORDS: Dict[str, TokenType] = {
 
 @dataclass(frozen=True)
 class Token:
+    """Single lexical token with exact source coordinates."""
+
     kind: TokenType
     lexeme: str
     line: int
@@ -102,6 +141,8 @@ class Token:
 
 @dataclass(frozen=True)
 class LexError:
+    """Recoverable lexical diagnostic produced by the lexer."""
+
     message: str
     line: int
     column: int
@@ -119,6 +160,8 @@ class Lexer:
         self.errors: List[LexError] = []
 
     def tokenize(self) -> tuple[List[Token], List[LexError]]:
+        """Tokenize the full input and return both tokens and lexing diagnostics."""
+
         while not self._is_at_end():
             self._scan_token()
 
@@ -160,12 +203,21 @@ class Lexer:
 
         two_char_map = {
             "->": TokenType.ARROW,
+            "=>": TokenType.FAT_ARROW,
             "==": TokenType.EQ,
             "!=": TokenType.NEQ,
             "<=": TokenType.LTE,
             ">=": TokenType.GTE,
             "&&": TokenType.AND,
             "||": TokenType.OR,
+            "<<": TokenType.SHIFT_LEFT,
+            ">>": TokenType.SHIFT_RIGHT,
+            "+=": TokenType.PLUS_ASSIGN,
+            "-=": TokenType.MINUS_ASSIGN,
+            "*=": TokenType.STAR_ASSIGN,
+            "/=": TokenType.SLASH_ASSIGN,
+            "++": TokenType.INC,
+            "--": TokenType.DEC,
         }
         pair = ch + self._peek_next()
         if pair in two_char_map:
@@ -183,11 +235,16 @@ class Lexer:
             ".": TokenType.DOT,
             ";": TokenType.SEMICOLON,
             ":": TokenType.COLON,
+            "@": TokenType.AT,
             "+": TokenType.PLUS,
             "-": TokenType.MINUS,
             "*": TokenType.STAR,
             "/": TokenType.SLASH,
             "%": TokenType.MOD,
+            "&": TokenType.BIT_AND,
+            "|": TokenType.BIT_OR,
+            "^": TokenType.BIT_XOR,
+            "~": TokenType.BIT_NOT,
             "!": TokenType.BANG,
             "=": TokenType.ASSIGN,
             "<": TokenType.LT,
@@ -215,6 +272,8 @@ class Lexer:
             self._scan_unsafe_block()
 
     def _scan_unsafe_block(self) -> None:
+        """Capture raw `unsafe { ... }` payload as a single token for backend passthrough."""
+
         self._skip_whitespace_and_comments()
 
         if self._peek() != "{":
@@ -290,6 +349,8 @@ class Lexer:
         self.tokens.append(Token(TokenType.UNSAFE_BLOCK, raw_payload, block_line, block_col))
 
     def _skip_whitespace_and_comments(self) -> None:
+        """Advance over trivia so grammar-level scanning can continue at significant tokens."""
+
         while not self._is_at_end():
             ch = self._peek()
             if ch in {" ", "\t", "\r"}:
@@ -307,8 +368,35 @@ class Lexer:
             break
 
     def _scan_number(self) -> None:
+        """Scan int/float/base-prefixed literals and duration suffixes."""
+
         line, column = self.line, self.column
         start = self.index
+
+        if self._peek() == "0" and self._peek_next() in {"x", "X"}:
+            self._advance()
+            self._advance()
+            base_start = self.index
+            while not self._is_at_end() and (self._peek().isdigit() or self._peek().lower() in {"a", "b", "c", "d", "e", "f"}):
+                self._advance()
+            if self.index == base_start:
+                self.errors.append(LexError("Invalid hexadecimal literal", line, column))
+            lexeme = self.source[start : self.index]
+            self.tokens.append(Token(TokenType.INT, lexeme, line, column))
+            return
+
+        if self._peek() == "0" and self._peek_next() in {"b", "B"}:
+            self._advance()
+            self._advance()
+            base_start = self.index
+            while not self._is_at_end() and self._peek() in {"0", "1"}:
+                self._advance()
+            if self.index == base_start:
+                self.errors.append(LexError("Invalid binary literal", line, column))
+            lexeme = self.source[start : self.index]
+            self.tokens.append(Token(TokenType.INT, lexeme, line, column))
+            return
+
         while not self._is_at_end() and self._peek().isdigit():
             self._advance()
 
@@ -318,6 +406,22 @@ class Lexer:
             self._advance()
             while not self._is_at_end() and self._peek().isdigit():
                 self._advance()
+
+        if not is_float:
+            duration_start = self.index
+            if self._peek() in {"m", "u"} and self._peek_next() == "s":
+                self._advance()
+                self._advance()
+            elif self._peek() == "s":
+                self._advance()
+
+            if self.index != duration_start:
+                # Keep duration suffixes strict to avoid swallowing identifiers.
+                if self._peek().isalnum() or self._peek() == "_":
+                    self.errors.append(LexError("Invalid duration literal suffix", line, column))
+                lexeme = self.source[start : self.index]
+                self.tokens.append(Token(TokenType.DURATION, lexeme, line, column))
+                return
 
         lexeme = self.source[start : self.index]
         self.tokens.append(Token(TokenType.FLOAT if is_float else TokenType.INT, lexeme, line, column))

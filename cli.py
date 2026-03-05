@@ -132,6 +132,8 @@ def compile_to_cpp(input_path: Path, out_path: Path, target: str = "esp32", boar
 
 
 def _convert_lex_errors(path: Path, errors: Sequence[LexError]) -> List[CompilerMessage]:
+    """Translate lexer diagnostics into unified CLI compiler messages."""
+
     return [
         CompilerMessage("lex", "error", err.message, err.line, err.column, str(path))
         for err in errors
@@ -139,6 +141,8 @@ def _convert_lex_errors(path: Path, errors: Sequence[LexError]) -> List[Compiler
 
 
 def _convert_parse_errors(path: Path, errors: Sequence[ParseError]) -> List[CompilerMessage]:
+    """Translate parser diagnostics into unified CLI compiler messages."""
+
     return [
         CompilerMessage("parse", "error", err.message, err.line, err.column, str(path))
         for err in errors
@@ -146,6 +150,8 @@ def _convert_parse_errors(path: Path, errors: Sequence[ParseError]) -> List[Comp
 
 
 def _convert_semantic_issues(path: Path, issues: Sequence[SemanticIssue]) -> List[CompilerMessage]:
+    """Translate semantic diagnostics into unified CLI compiler messages."""
+
     return [
         CompilerMessage(
             "semantic",
@@ -160,6 +166,8 @@ def _convert_semantic_issues(path: Path, issues: Sequence[SemanticIssue]) -> Lis
 
 
 def _convert_module_graph_issues(issues: Sequence[ModuleIssue]) -> List[CompilerMessage]:
+    """Translate module-graph resolution diagnostics into CLI message format."""
+
     return [
         CompilerMessage(
             stage="module",
@@ -174,6 +182,8 @@ def _convert_module_graph_issues(issues: Sequence[ModuleIssue]) -> List[Compiler
 
 
 def _convert_module_errors(graph: ModuleGraph) -> List[CompilerMessage]:
+    """Collect lex/parse errors emitted by each module in the resolved import graph."""
+
     messages: List[CompilerMessage] = []
     for module_path, unit in graph.modules.items():
         messages.extend(_convert_lex_errors(module_path, unit.lex_errors))
@@ -182,6 +192,8 @@ def _convert_module_errors(graph: ModuleGraph) -> List[CompilerMessage]:
 
 
 def _merge_module_programs(graph: ModuleGraph) -> Program:
+    """Merge module ASTs in topological order while stripping import declarations."""
+
     declarations = []
     for module_path in graph.topo_order:
         unit = graph.modules[module_path]
@@ -259,6 +271,8 @@ def _run_cli_with_json_diagnostics(
     line_map: Dict[int, SourceMapEntry],
     sketch_dir: Path,
 ) -> int:
+    """Run arduino-cli command and remap generated .ino diagnostics back to DSL lines."""
+
     try:
         completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
@@ -299,6 +313,8 @@ def _print_mapped_text(
     sketch_dir: Path,
     level: Optional[str] = None,
 ) -> bool:
+    """Print one remapped compiler diagnostic line when generated coordinates are known."""
+
     pattern = re.compile(r"(?P<path>[A-Za-z]:[^:\n]+|[^:\n]+\.ino):(?P<line>\d+):(?P<col>\d+):\s*(?P<kind>error|warning):\s*(?P<msg>.*)")
     match = pattern.search(text)
     if match is None:
@@ -329,6 +345,8 @@ def _print_mapped_text(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """CLI main entrypoint for check, transpile, and build workflows."""
+
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 

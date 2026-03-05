@@ -16,8 +16,6 @@ N O V A  |  Embedded Control Language and Transpiler
 > "What I cannot create, I do not understand."
 > - Richard Feynman
 
-Repository: https://github.com/Noamismach/nova-compiler
-
 ---
 
 ## Introduction
@@ -31,6 +29,17 @@ NOVA's correctness guarantees rest on three structural invariants:
 1. **Syntactic rigor** - An explicit EBNF grammar drives a hand-written recursive descent parser, producing a fully typed AST with source-position annotations at every node.
 2. **Semantic safety** - Board-aware hardware profiles are loaded during semantic analysis. Every pin reference, peripheral assignment, and timing assumption is validated against the selected silicon profile before code generation begins.
 3. **Backend fidelity** - The code generation pass performs target-aware lowering. DSL-level primitives (e.g., `rgbWrite`) are resolved to board-native intrinsics (e.g., `neopixelWrite`) with no external library dependencies and no behavioral approximation.
+
+## NOVA 2.0 Highlights
+
+NOVA 2.0 expands the language from a single-file control DSL into a modular embedded systems language with richer type and concurrency primitives.
+
+- **Structs and member access**: declare POD-style structs, initialize with named fields, and access members via `.`.
+- **Pattern control flow**: use `match` with wildcard exhaustiveness checks and value-producing `if` expressions.
+- **Task orchestration**: declare `task` units, annotate them with `@core(...)` and `@rate(...)`, and launch with `spawn`.
+- **Declarative buses/devices**: describe `bus` and `device` resources directly in DSL and lower to board APIs (`Wire.begin(...)` for I2C).
+- **Module imports**: split programs across files with `import` and compile via topological module graph merge.
+- **Explicit casting and unsafe regions**: use `as` for primitive casts and `unsafe { ... }` for controlled raw backend escape hatches.
 
 ---
 
