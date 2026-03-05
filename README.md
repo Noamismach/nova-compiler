@@ -51,6 +51,15 @@ Phase 2 introduces native networking modules that run directly on ESP32-class ha
 - **Heap-backed server allocation**: `WebServer` is allocated off the task stack to reduce crash/reboot risk.
 - **Dynamic include emission**: codegen scans AST/unsafe payloads and injects only required global headers (`WiFi.h`, `WebServer.h`, `Wire.h`).
 
+## Phase 3: Security and Hardware Cryptography
+
+Phase 3 introduces native cryptographic primitives for ESP32-class targets through the ESP-IDF `mbedtls` integration layer.
+
+- **`crypto.myext` standard module**: exposes `hashSha256(payload: string)` for SHA-256 digest generation.
+- **ESP32-S3 hardware-backed path**: digest operations run through `mbedtls` APIs that can leverage on-chip crypto accelerators when available.
+- **Safe prelude include strategy**: codegen injects `#include <mbedtls/md.h>` globally when crypto usage is detected, keeping unsafe payloads free of preprocessor directives.
+- **V1 output model**: SHA-256 digest is emitted as lowercase hexadecimal text through `Serial.println(...)`.
+
 ## Developer Experience
 
 - **Live CLI monitor**: `python cli.py monitor --port COM6 --baud 115200`

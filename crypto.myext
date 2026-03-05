@@ -1,0 +1,48 @@
+fn hashSha256(payload: string) -> void {
+    unsafe {
+        // The helper may run before other modules initialize Serial.
+        static bool serialReady = false;
+        if (!serialReady) {
+            Serial.begin(115200);
+            serialReady = true;
+            delay(50);
+        }
+
+        // mbedTLS digest API is backed by ESP-IDF integration and can route to
+        // hardware acceleration on ESP32-S3 when available.
+        const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+        if (mdInfo == nullptr) {
+            Serial.println("NOVA: Failed to get SHA-256 descriptor.");
+            return;
+        }
+
+        mbedtls_md_context_t ctx;
+        mbedtls_md_init(&ctx);
+
+        if (mbedtls_md_setup(&ctx, mdInfo, 0) != 0) {
+            Serial.println("NOVA: mbedtls_md_setup failed.");
+            mbedtls_md_free(&ctx);
+            return;
+        }
+
+        // Feed UTF-8 bytes from Arduino String into the streaming digest state.
+        unsigned char digest[32];
+        mbedtls_md_starts(&ctx);
+        mbedtls_md_update(
+            &ctx,
+            reinterpret_cast<const unsigned char*>(payload.c_str()),
+            payload.length()
+        );
+        mbedtls_md_finish(&ctx, digest);
+        mbedtls_md_free(&ctx);
+
+        // Render canonical lowercase hexadecimal SHA-256 text (64 chars + NUL).
+        char hexDigest[65];
+        for (int i = 0; i < 32; ++i) {
+            snprintf(&hexDigest[i * 2], 3, "%02x", digest[i]);
+        }
+        hexDigest[64] = '\0';
+
+        Serial.println(hexDigest);
+    }
+}

@@ -215,6 +215,10 @@ class ArduinoGeneratorBase:
             includes.append("#include <WebServer.h>")
         if "Wire.h" in self.required_headers:
             includes.append("#include <Wire.h>")
+        if "mbedtls/md.h" in self.required_headers:
+            # Unsafe blocks cannot reliably own preprocessor directives; centralize
+            # crypto headers in the translation-unit prelude.
+            includes.append("#include <mbedtls/md.h>")
         includes.append("")
         return includes
 
@@ -230,10 +234,14 @@ class ArduinoGeneratorBase:
         """Collect header needs from top-level declarations."""
 
         if isinstance(decl, TaskDecl):
+            if self._is_crypto_symbol(decl.name):
+                headers.add("mbedtls/md.h")
             if decl.body is not None:
                 self._collect_headers_from_block(decl.body, headers)
             return
         if isinstance(decl, FunctionDecl):
+            if self._is_crypto_symbol(decl.name):
+                headers.add("mbedtls/md.h")
             self._collect_headers_from_block(decl.body, headers)
             return
         if isinstance(decl, LoopBlockDecl):
@@ -333,6 +341,11 @@ class ArduinoGeneratorBase:
     def _collect_headers_from_expr(self, expr: Expr, headers: Set[str]) -> None:
         """Collect header needs from one expression subtree."""
 
+        if isinstance(expr, IdentifierExpr):
+            if self._is_crypto_symbol(expr.name):
+                headers.add("mbedtls/md.h")
+            return
+
         if isinstance(expr, IfExpr):
             self._collect_headers_from_expr(expr.condition, headers)
             self._collect_headers_from_block(expr.then_block, headers)
@@ -370,7 +383,12 @@ class ArduinoGeneratorBase:
                 self._collect_headers_from_expr(value_expr, headers)
 
     def _collect_headers_from_raw_cpp(self, raw_cpp: str, headers: Set[str]) -> None:
-        """Infer headers from unsafe C++ payloads used by stdlib escape hatches."""
+        """Infer headers from unsafe C++ payloads used by stdlib escape hatches.
+
+        The lexer/parser treat `unsafe { ... }` as opaque raw C++, so this method
+        applies lightweight symbol heuristics to keep required includes in one
+        predictable global prelude.
+        """
 
         if "WebServer" in raw_cpp:
             headers.add("WebServer.h")
@@ -378,6 +396,20 @@ class ArduinoGeneratorBase:
             headers.add("WiFi.h")
         if "Wire" in raw_cpp:
             headers.add("Wire.h")
+        if "mbedtls" in raw_cpp or "MBEDTLS_" in raw_cpp:
+            # ESP-IDF wires mbedTLS to hardware crypto accelerators on supported
+            # SoCs (including ESP32-S3) behind the standard digest API.
+            headers.add("mbedtls/md.h")
+
+    def _is_crypto_symbol(self, symbol_name: str) -> bool:
+        """Return True when a symbol implies the crypto stdlib is in play.
+
+        This fallback keeps header inference resilient when unsafe payloads are
+        abstracted behind wrappers like `hashSha256`.
+        """
+
+        lowered = symbol_name.lower()
+        return "crypto" in lowered or "sha256" in lowered or "mbedtls" in lowered
 
     def _emit_task_function(self, task_decl: TaskDecl) -> List[EmittedLine]:
         out: List[EmittedLine] = [EmittedLine(f"void __task_{task_decl.name}(void* pvParameters) {{", task_decl.span)]

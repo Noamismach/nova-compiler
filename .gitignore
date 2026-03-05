@@ -188,3 +188,4 @@ site/
 
 # Local NOVA sandbox test programs (keep local, do not track in git)
 *_test.myext
+crypto_test.myext

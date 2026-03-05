@@ -14,6 +14,7 @@ This reference includes NOVA 2.0 capabilities:
 - Explicit cast expressions via `as`
 - Raw backend passthrough blocks via `unsafe { ... }`
 - Native networking modules for Wi-Fi and HTTP serving (`wifi.myext`, `http.myext`)
+- Native cryptography module for SHA-256 hashing (`crypto.myext`) via ESP-IDF `mbedtls`
 - Live serial monitor workflow via `cli.py monitor`
 
 ## 1) Variables & Types
@@ -371,7 +372,28 @@ NOVA Phase 2 ships a standard networking layer for ESP32-class targets.
 
 ---
 
-## 8) Board Profiles and CLI Usage
+## 8) Phase 3 Hardware Cryptography
+
+NOVA Phase 3 adds a native cryptography layer for ESP32-class targets.
+
+### Crypto module
+
+- `crypto.myext` provides `hashSha256(payload: string)`.
+- The current V1 implementation prints the 64-character lowercase hexadecimal digest via `Serial.println(...)`.
+
+### Runtime backend behavior
+
+- The SHA-256 flow uses `mbedtls_md_context_t` with `mbedtls_md_starts`, `mbedtls_md_update`, and `mbedtls_md_finish`.
+- On ESP32-S3 targets, ESP-IDF's `mbedtls` integration can route digest operations through hardware cryptographic accelerators.
+
+### Code generation behavior for cryptography
+
+- Header includes are emitted at global scope.
+- Codegen injects `mbedtls/md.h` when cryptography usage is inferred from AST symbols or unsafe payload markers.
+
+---
+
+## 9) Board Profiles and CLI Usage
 
 NOVA semantic checks are board-aware through `--board`.
 
